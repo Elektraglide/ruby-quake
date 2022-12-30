@@ -519,6 +519,10 @@ class GameParser
 					# place it
 					origin = getkeyvector(current, "origin", "0 0 0")
 					ltm = Geom::Transformation.new(origin)
+					if (getkeystring(current, "classname", "").include?("large"))
+						ltm = ltm * Geom::Transformation.scaling(2)
+						ltm = ltm * Geom::Transformation.translation([0,0,5])
+					end
 					unless proxy["angle"]
 						dir = getkeyval(current, "angle", 0.0) * Math::PI / 180
 						ltm = Geom::Transformation.rotation(ltm.origin, Geom::Vector3d.new(0,0,1), dir) * ltm
@@ -889,7 +893,7 @@ class Quake1Parser < GameParser
 						# set some material lighting attributes
 						mat.set_attribute(:lmap, :noshadow, true)
 						if (matname[0,5] == "flame")
-							mat.set_attribute(:lmap, :fullbright, true)
+							mat.set_attribute(:lmap, :additive, true)
 						end
 					end
 					offset += mdl.skinwidth * mdl.skinheight
