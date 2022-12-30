@@ -753,6 +753,7 @@ class Quake1Parser < GameParser
 				# large emitters
 				if (matname[1,4] == "lava") or (matname[1,5] == "slime") or (matname[1,8] == "teleport")
 					mat.set_attribute(:lmap, :emitter, true)
+					mat.set_attribute(:lmap, :fullbright, true)
 					mat.set_attribute(:lmap, :density, 1.0)
 					mat.set_attribute(:lmap, :power, 100.0)
 					dsided = true
@@ -776,6 +777,7 @@ class Quake1Parser < GameParser
 				if (matname.include?("light")) or (matname.include?("lite"))
 					unless (matname.include?("light1_2") or matname.include?("light3_6") or matname.include?("light3_7"))
 						mat.set_attribute(:lmap, :emitter, true)
+						mat.set_attribute(:lmap, :additive, true)
 						mat.set_attribute(:lmap, :density, 0.0)
 						mat.set_attribute(:lmap, :power, 1000.0)
 					end
@@ -784,6 +786,7 @@ class Quake1Parser < GameParser
 				# random area lights
 				if (matname.include?("metal5_8")) or (matname.include?("slipside"))
 					mat.set_attribute(:lmap, :emitter, true)
+					mat.set_attribute(:lmap, :additive, true)
 					mat.set_attribute(:lmap, :density, 0.0)
 					mat.set_attribute(:lmap, :power, 1000.0)
 				end
