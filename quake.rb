@@ -381,9 +381,10 @@ end 	# DONT DEFINE TWICE
 
 class GameParser
 
-	TEMP = ENV['TEMP']
-	TEMP = ENV['TMPDIR'] unless TEMP
-	TEMP += "/"
+	path = ENV['TEMP'] if ENV['TEMP']
+	path = ENV['TMPDIR'] if ENV['TMPDIR']
+	TEMP = path + "/"
+	puts "writing textures to #{TEMP}"
 
 	def nextentity(current)
 
@@ -641,9 +642,103 @@ class Quake1Parser < GameParser
 
 		#WalkNodes(nodes, 0)
 
-		# read mipheader
+		# read mipheader and all miptexs
+		mats = []
 		mipheader = Mipheader_t.new(mapbytes[map.lump_textures.offset0, Mipheader_t.round_byte_length])
-		#puts "AddBrush: #{mipheader.numtex} textures"
+		texoffsets = mapbytes[map.lump_textures.offset0 + Mipheader_t.round_byte_length, mipheader.numtex * 4].unpack('V*')
+		for tid in 0...mipheader.numtex
+			mip = Miptex_t.new(mapbytes[map.lump_textures.offset0 + texoffsets[tid],  Miptex_t.round_byte_length])
+			#ensure its zero terminated so we can save it
+			matname = mip.name
+			matname = mip.name[0,mip.name.index(/\x00/)] if (mip.name.index(/\x00/) != nil)
+			# map to valid filename
+			matname[0] = '_' if matname[0] == '*'
+
+			mat = Sketchup.active_model.materials[matname]
+			if not mat
+				puts "Material(#{matname}): size(#{mip.width},#{mip.width})"
+				mat = Sketchup.active_model.materials.add(matname)
+	
+				pixels = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset1, mip.width * mip.height].bytes
+				img = QImage.new(mip.width,mip.height)
+				for y in 0...mip.height
+					for x in 0...mip.width 
+						pix = pixels[y*mip.width+x].to_i
+						color = Geom::Vector3d.new(@qpalette[pix*3+0],@qpalette[pix*3+1],@qpalette[pix*3+2])
+						img.plot(x,y, color)
+	
+						# pure blue is chromakey
+						if color[0] == 0 && color[1] == 0 && color[2] > 240
+							img.transparent(x,y)
+						end
+					end
+				end
+
+				filename = TEMP + matname + ".tga"
+				img.writeTGA(filename)
+	
+				mat.texture = filename
+	
+				# glow
+				if (matname[1,4] == "lava")
+					mat.set_attribute(:lmap, :rgbwave, 4)
+					mat.set_attribute(:lmap, :rgbamp, 0.4)
+					mat.set_attribute(:lmap, :rgbbase, 0.6)
+					mat.set_attribute(:lmap, :rgbfreq, 0.75)
+				end
+				
+				# crazy additive scroll
+				if (matname[1,8] == "teleport")
+					mat.set_attribute(:lmap, :uvwave, 6)
+					mat.set_attribute(:lmap, :uvmode, 2)
+					mat.set_attribute(:lmap, :uvfreq, 1.0)
+					mat.set_attribute(:lmap, :additive, true)
+					mat.set_attribute(:lmap, :fullbright, true)
+					mat.alpha = 0.9
+				end
+	
+				# large emitters
+				if (matname[1,4] == "lava") or (matname[1,5] == "slime") or (matname[1,8] == "teleport")
+					mat.set_attribute(:lmap, :emitter, true)
+					mat.set_attribute(:lmap, :fullbright, true)
+					mat.set_attribute(:lmap, :density, 1.0)
+					mat.set_attribute(:lmap, :power, 100.0)
+					mat.alpha = 0.7
+				end
+	
+				if (matname[0,3] == "sky")
+					mat.set_attribute(:lmap, :noshadow, true)
+					mat.set_attribute(:lmap, :fullbright, true)
+					mat.set_attribute(:lmap, :emitter, true)
+					mat.set_attribute(:lmap, :density, 1.0)
+					mat.set_attribute(:lmap, :power, 100.0)
+					mat.alpha = 0.01
+				end
+	
+				# area lights with canonical-ish names
+				if (matname.include?("light")) or (matname.include?("lite"))
+					unless (matname.include?("light1_2") or matname.include?("light3_6") or matname.include?("light3_7"))
+						mat.set_attribute(:lmap, :emitter, true)
+						mat.set_attribute(:lmap, :additive, true)
+						mat.set_attribute(:lmap, :density, 0.0)
+						mat.set_attribute(:lmap, :power, 1000.0)
+					end
+				end
+	
+				# random area lights
+				if (matname.include?("metal5_8")) or (matname.include?("slipside"))
+					mat.set_attribute(:lmap, :emitter, true)
+					mat.set_attribute(:lmap, :additive, true)
+					mat.set_attribute(:lmap, :density, 0.0)
+					mat.set_attribute(:lmap, :power, 1000.0)
+				end
+	
+			end
+
+			mats[tid] = mat
+		end
+puts mats
+
 		amodel.face_num.times do
 			
 			vertices = []
@@ -677,129 +772,17 @@ class Quake1Parser < GameParser
 			face.reverse! if normal.dot(face.normal) < 0
 			
 			texinfo = Texinfo_t.new(mapbytes[map.lump_texinfo.offset0 + Texinfo_t.round_byte_length * faces.texinfo_id, Texinfo_t.round_byte_length])
-			toffset = mapbytes[map.lump_textures.offset0 + Mipheader_t.round_byte_length + texinfo.texture_id*4, 4].unpack('V')[0]
-			mip = Miptex_t.new(mapbytes[map.lump_textures.offset0 + toffset,  Miptex_t.round_byte_length])
-
-			#ensure its zero terminated so we can save it
-			matname = mip.name
-			matname = mip.name[0,mip.name.index(/\x00/)] if (mip.name.index(/\x00/) != nil)
+			mat = mats[texinfo.texture_id]
 
 			# ensure liquids face up, facedness seems inconsistent..
-			if (matname[0] == '*') and (face.normal.dot(Geom::Vector3d.new(0,0,1)) < 0)
-				puts "wrong facedness #{matname}"
+			if (mat.name[4] == '_') and (face.normal.dot(Geom::Vector3d.new(0,0,1)) < 0)
+				puts "wrong facedness #{mat.name}"
 				face.reverse!
 			end
 
 			# some we want to make doublesided
-			dsided = matname[0] == '*'
+			dsided = (mat.name[4] == '_')
 
-			# map to valid filename
-			matname[0] = '_' if matname[0] == '*'
-			mat = Sketchup.active_model.materials[matname]
-			if not mat
-				puts "Material(#{matname}): size(#{mip.width},#{mip.width}) offset(#{toffset})"
-	
-				pixels = mapbytes[map.lump_textures.offset0 + toffset + mip.offset1, mip.width * mip.height].bytes
-				img = QImage.new(mip.width,mip.height)
-				for y in 0...mip.height
-					for x in 0...mip.width 
-						pix = pixels[y*mip.width+x].to_i
-						color = Geom::Vector3d.new(@qpalette[pix*3+0],@qpalette[pix*3+1],@qpalette[pix*3+2])
-						img.plot(x,y, color)
-
-						# pure blue is chromakey
-						if color[0] == 0 && color[1] == 0 && color[2] > 240
-							img.transparent(x,y)
-						end
-					end
-				end
-
-				filename = TEMP + matname + ".tga"
-				img.writeTGA(filename)
-
-				# dump animated textures
-	if false and (matname[0] == '+')
-					puts "#{matname}: animated  "
-
-				toffset += mip.width * mip.height
-				pixels = mapbytes[map.lump_textures.offset0 + toffset + mip.offset1, mip.width * mip.height].bytes
-				img = QImage.new(mip.width,mip.height)
-				img.writeTGA(TEMP + matname + "_NEXT.tga")
-
-	end				
-	
-				mat = Sketchup.active_model.materials.add(matname)
-				mat.texture = filename
-
-				# glow
-				if (matname[1,4] == "lava")
-					mat.set_attribute(:lmap, :rgbwave, 4)
-					mat.set_attribute(:lmap, :rgbamp, 0.4)
-					mat.set_attribute(:lmap, :rgbbase, 0.6)
-					mat.set_attribute(:lmap, :rgbfreq, 0.75)
-				end
-				
-				# scroll
-				if (texinfo.animated == 1)
-				#if (mip.name[0] == 42)		## or (matname[1,4] == "lava") or (matname[1,5] == "slime") or matname.include?("water")
-					mat.set_attribute(:lmap, :uvwave, 4)
-					mat.set_attribute(:lmap, :uvfreq, 0.1)
-					mat.set_attribute(:lmap, :uvdir, 30.0)
-					mat.alpha = 0.9
-				end
-
-				# crazy additive scroll
-				if (matname[1,8] == "teleport")
-					mat.set_attribute(:lmap, :uvwave, 6)
-					mat.set_attribute(:lmap, :uvmode, 2)
-					mat.set_attribute(:lmap, :uvfreq, 1.0)
-					mat.set_attribute(:lmap, :additive, true)
-					mat.set_attribute(:lmap, :fullbright, true)
-					mat.alpha = 0.9
-				end
-
-				# large emitters
-				if (matname[1,4] == "lava") or (matname[1,5] == "slime") or (matname[1,8] == "teleport")
-					mat.set_attribute(:lmap, :emitter, true)
-					mat.set_attribute(:lmap, :fullbright, true)
-					mat.set_attribute(:lmap, :density, 1.0)
-					mat.set_attribute(:lmap, :power, 100.0)
-					dsided = true
-					mat.alpha = 0.7
-				end
-
-				if (matname[0,3] == "sky")
-					mat.set_attribute(:lmap, :noshadow, true)
-					mat.set_attribute(:lmap, :fullbright, true)
-					mat.set_attribute(:lmap, :emitter, true)
-					mat.set_attribute(:lmap, :density, 1.0)
-					mat.set_attribute(:lmap, :power, 100.0)
-					mat.alpha = 0.01
-				end
-	
-				if (matname.include?("water"))
-					dsided = true
-				end
-
-				# area lights with canonical-ish names
-				if (matname.include?("light")) or (matname.include?("lite"))
-					unless (matname.include?("light1_2") or matname.include?("light3_6") or matname.include?("light3_7"))
-						mat.set_attribute(:lmap, :emitter, true)
-						mat.set_attribute(:lmap, :additive, true)
-						mat.set_attribute(:lmap, :density, 0.0)
-						mat.set_attribute(:lmap, :power, 1000.0)
-					end
-				end
-
-				# random area lights
-				if (matname.include?("metal5_8")) or (matname.include?("slipside"))
-					mat.set_attribute(:lmap, :emitter, true)
-					mat.set_attribute(:lmap, :additive, true)
-					mat.set_attribute(:lmap, :density, 0.0)
-					mat.set_attribute(:lmap, :power, 1000.0)
-				end
-
-			end
 			pos_tex = []
 			for i in 0...vertices.size do
 				u = texinfo.distS + vertices[i].pdot(Geom::Vector3d.new(texinfo.vectorS.x,texinfo.vectorS.y,texinfo.vectorS.z))
@@ -816,7 +799,7 @@ class Quake1Parser < GameParser
 
 					if area > 0
 						pos_tex += [[vertices[i].x, vertices[i].y, vertices[i].z]]
-						pos_tex += [[u/mip.width, v/mip.height]]
+						pos_tex += [[u/mat.texture.image_width, v/mat.texture.image_height]]
 					end
 				end
 			end	
