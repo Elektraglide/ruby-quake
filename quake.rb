@@ -694,7 +694,6 @@ class Quake1Parser < GameParser
 			dsided = matname[0] == '*'
 
 			# map to valid filename
-$MATNAME = matname
 			matname[0] = '_' if matname[0] == '*'
 			mat = Sketchup.active_model.materials[matname]
 			if not mat
