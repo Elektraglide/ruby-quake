@@ -381,6 +381,10 @@ end 	# DONT DEFINE TWICE
 
 class GameParser
 
+	TEMP = ENV['TEMP']
+	TEMP = ENV['TMPDIR'] unless TEMP
+	TEMP += "/"
+
 	def nextentity(current)
 
 		b = current.index('}')
@@ -485,7 +489,7 @@ class GameParser
 		
 			entities = GetEntities(mapbytes)
 			begin
-				myfile = File.new(ENV['TMPDIR']+"/entities.txt", "w+")
+				myfile = File.new(TEMP+"/entities.txt", "w+")
 				myfile.puts(entities)
 				myfile.close
 			rescue
@@ -690,7 +694,8 @@ class Quake1Parser < GameParser
 			dsided = matname[0] == '*'
 
 			# map to valid filename
-			matname[0] = '_'.ord if matname[0] == '*'.ord
+$MATNAME = matname
+			matname[0] = '_' if matname[0] == '*'
 			mat = Sketchup.active_model.materials[matname]
 			if not mat
 				puts "Material(#{matname}): size(#{mip.width},#{mip.width}) offset(#{toffset})"
@@ -710,7 +715,7 @@ class Quake1Parser < GameParser
 					end
 				end
 
-				filename = "/tmp/" + matname + ".tga"
+				filename = TEMP + matname + ".tga"
 				img.writeTGA(filename)
 
 				# dump animated textures
@@ -720,7 +725,7 @@ class Quake1Parser < GameParser
 				toffset += mip.width * mip.height
 				pixels = mapbytes[map.lump_textures.offset0 + toffset + mip.offset1, mip.width * mip.height].bytes
 				img = QImage.new(mip.width,mip.height)
-				img.writeTGA("/tmp/" + matname + "_NEXT.tga")
+				img.writeTGA(TEMP + matname + "_NEXT.tga")
 
 	end				
 	
@@ -884,7 +889,7 @@ class Quake1Parser < GameParser
 								end
 							end
 						end
-						filename = "/tmp/" + matname + ".tga"
+						filename = TEMP + matname + ".tga"
 						img.writeTGA(filename)
 					
 						mat = Sketchup.active_model.materials.add(matname)
@@ -1307,7 +1312,8 @@ def stopdog(wd)
 	nil
 end
 
-wd = watchdog(60)
+# enable this to break out after N seconds
+#wd = watchdog(60)
 
 filename = UI.openpanel "Choose Quake map", 'q1pak/maps', 'e1m1.bsp'
 if (filename)
@@ -1319,5 +1325,5 @@ if (filename)
 	Sketchup.active_model.layers["NODRAW"].visible = false
 end
 
-stopdog(wd)
+#stopdog(wd)
 
