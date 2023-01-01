@@ -737,7 +737,6 @@ class Quake1Parser < GameParser
 
 			mats[tid] = mat
 		end
-puts mats
 
 		amodel.face_num.times do
 			
@@ -775,13 +774,15 @@ puts mats
 			mat = mats[texinfo.texture_id]
 
 			# ensure liquids face up, facedness seems inconsistent..
-			if (mat.name[4] == '_') and (face.normal.dot(Geom::Vector3d.new(0,0,1)) < 0)
-				puts "wrong facedness #{mat.name}"
-				face.reverse!
+			if (mat.name.include?("lava") or mat.name.include?("slime") or mat.name.include?("water"))
+				if (face.normal.dot(Geom::Vector3d.new(0,0,1)) < 0)
+					puts "wrong facedness #{mat.name}"
+					face.reverse!
+				end
 			end
 
 			# some we want to make doublesided
-			dsided = (mat.name[4] == '_')
+			dsided = (mat.name[0] == '_')
 
 			pos_tex = []
 			for i in 0...vertices.size do
