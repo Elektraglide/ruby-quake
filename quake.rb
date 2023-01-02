@@ -782,7 +782,8 @@ class Quake1Parser < GameParser
 			end
 
 			# some we want to make doublesided
-			dsided = (mat.name[0] == '_') or mat.name.include?("sky")
+			# 
+			dsided = ((mat.name[0] == '_') or (mat.name[0,3] == "sky"))
 
 			pos_tex = []
 			for i in 0...vertices.size do
