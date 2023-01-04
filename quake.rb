@@ -11,6 +11,8 @@ require 'bit-struct/bit-struct'
 require 'bit-struct/fields'
 end
 
+module QuakeImporter
+
 class QImage
 	@@empty = [255,128,64,255]
 	def initialize(w,h)
@@ -67,13 +69,9 @@ class QImage
 	end
 end
 
-
-class Geom::Point3d
-	def pdot(v)
-		self.x * v.x + self.y * v.y + self.z * v.z
-	end
+def QuakeImporter.pdot(a,v)
+	a.x * v.x + a.y * v.y + a.z * v.z
 end
-
 
 if not defined?(Lump_t)
 
@@ -628,6 +626,31 @@ class Quake1Parser < GameParser
 
 	end
 
+	def AddTexture(matname, pixels, mip, palette)
+
+		mat = Sketchup.active_model.materials.add(matname)
+
+		img = QImage.new(mip.width,mip.height)
+		for y in 0...mip.height
+			for x in 0...mip.width 
+				pix = pixels[y*mip.width+x].to_i
+				color = Geom::Vector3d.new(palette[pix*3+0],palette[pix*3+1],palette[pix*3+2])
+				img.plot(x,y, color)
+
+				# pure blue is chromakey
+				if color[0] == 0 && color[1] == 0 && color[2] > 240
+					img.transparent(x,y)
+				end
+			end
+		end
+
+		filename = TEMP + matname + ".tga"
+		img.writeTGA(filename)
+
+		mat.texture = filename
+
+		return mat
+	end
 	
 	def AddBrush(mapbytes, mid)
 		map = Dheader_t.new(mapbytes)
@@ -657,27 +680,9 @@ class Quake1Parser < GameParser
 			mat = Sketchup.active_model.materials[matname]
 			if not mat
 				puts "Material(#{matname}): size(#{mip.width},#{mip.width})"
-				mat = Sketchup.active_model.materials.add(matname)
-	
-				pixels = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset1, mip.width * mip.height].bytes
-				img = QImage.new(mip.width,mip.height)
-				for y in 0...mip.height
-					for x in 0...mip.width 
-						pix = pixels[y*mip.width+x].to_i
-						color = Geom::Vector3d.new(@qpalette[pix*3+0],@qpalette[pix*3+1],@qpalette[pix*3+2])
-						img.plot(x,y, color)
-	
-						# pure blue is chromakey
-						if color[0] == 0 && color[1] == 0 && color[2] > 240
-							img.transparent(x,y)
-						end
-					end
-				end
 
-				filename = TEMP + matname + ".tga"
-				img.writeTGA(filename)
-	
-				mat.texture = filename
+				pixels = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset1, mip.width * mip.height].bytes
+				mat = AddTexture(matname, pixels, mip, @qpalette)
 	
 				# glow
 				if (matname[1,4] == "lava")
@@ -701,7 +706,7 @@ class Quake1Parser < GameParser
 				if (matname[1,4] == "lava") or (matname[1,5] == "slime") or (matname[1,8] == "teleport")
 					mat.set_attribute(:lmap, :emitter, true)
 					mat.set_attribute(:lmap, :fullbright, true)
-					mat.set_attribute(:lmap, :density, 1.0)
+					mat.set_attribute(:lmap, :density, 0.25)
 					mat.set_attribute(:lmap, :power, 100.0)
 					mat.alpha = 0.7
 				end
@@ -710,7 +715,7 @@ class Quake1Parser < GameParser
 					mat.set_attribute(:lmap, :noshadow, true)
 					mat.set_attribute(:lmap, :fullbright, true)
 					mat.set_attribute(:lmap, :emitter, true)
-					mat.set_attribute(:lmap, :density, 1.0)
+					mat.set_attribute(:lmap, :density, 0.25)
 					mat.set_attribute(:lmap, :power, 100.0)
 					mat.alpha = 0.01
 				end
@@ -733,6 +738,9 @@ class Quake1Parser < GameParser
 					mat.set_attribute(:lmap, :power, 1000.0)
 				end
 	
+				if (matname.include?("+0_med")) or (matname.include?("rune")) or (matname.include?("+0slip")) or (matname.include?("slipside"))
+					mat.set_attribute(:lmap, :additive, true)
+				end
 			end
 
 			mats[tid] = mat
@@ -787,8 +795,8 @@ class Quake1Parser < GameParser
 
 			pos_tex = []
 			for i in 0...vertices.size do
-				u = texinfo.distS + vertices[i].pdot(Geom::Vector3d.new(texinfo.vectorS.x,texinfo.vectorS.y,texinfo.vectorS.z))
-				v = texinfo.distT + vertices[i].pdot(Geom::Vector3d.new(texinfo.vectorT.x,texinfo.vectorT.y,texinfo.vectorT.z))
+				u = texinfo.distS + QuakeImporter.pdot(vertices[i], Geom::Vector3d.new(texinfo.vectorS.x,texinfo.vectorS.y,texinfo.vectorS.z))
+				v = texinfo.distT + QuakeImporter.pdot(vertices[i], Geom::Vector3d.new(texinfo.vectorT.x,texinfo.vectorT.y,texinfo.vectorT.z))
 				
 				# accumulate the first 3 coordinate non-zero area pairs
 				if (pos_tex.length < 6)
@@ -880,7 +888,6 @@ class Quake1Parser < GameParser
 						mat.texture = filename
 						
 						# set some material lighting attributes
-						mat.set_attribute(:lmap, :noshadow, true)
 						if (matname[0,5] == "flame")
 							mat.set_attribute(:lmap, :additive, true)
 						end
@@ -1296,12 +1303,14 @@ def stopdog(wd)
 	nil
 end
 
+end # QuakeImporter
+
 # enable this to break out after N seconds
-#wd = watchdog(60)
+#wd = QuakeImporter::watchdog(60)
 
 filename = UI.openpanel "Choose Quake map", 'q1pak/maps', 'e1m1.bsp'
 if (filename)
-	parser = Quake1Parser.new
+	parser = QuakeImporter::Quake1Parser.new
 	parser.Parse(File.dirname(filename)+"/..", File.basename(filename))
 	Sketchup.active_model.name = "#{File.basename(filename)}"
 	Sketchup.active_model.description = "Quake map: #{File.basename(filename)}"
@@ -1309,5 +1318,5 @@ if (filename)
 	Sketchup.active_model.layers["NODRAW"].visible = false
 end
 
-#stopdog(wd)
+#QuakeImporter::stopdog(wd)
 
