@@ -1080,7 +1080,7 @@ class Quake1Parser < GameParser
 		end
 
 		if classname[0,5] == "item_"
-			dict = {"weapon" => "g_shot", "sigil" => "end1", "key" => "m_g_key", "key2" => "m_s_key", "armor" => "armor",  "armorInv" => "armor", "armor1" => "armor", "armor2" => "armor", "health" => "b_bh25", "shells" => "b_shell0", "grenades" => "grenade", "spikes" => "b_nail0", "rockets" => "b_rock0", "cells" =>"b_batt0"}
+			dict = {"weapon" => "g_shot",  "artifact_super_damage" => "quaddama", "sigil" => "end1", "key" => "m_g_key", "key2" => "m_s_key", "armor" => "armor",  "armorInv" => "armor", "armor1" => "armor", "armor2" => "armor", "health" => "b_bh25", "shells" => "b_shell0", "grenades" => "grenade", "spikes" => "b_nail0", "rockets" => "b_rock0", "cells" =>"b_batt0"}
 			proxy["model"] = dict[classname[5..-1]]
 		end
 
@@ -1090,7 +1090,7 @@ class Quake1Parser < GameParser
 		end
 
 		if classname[0,8] == "monster_"
-			dict = {"hell_knight" => "hknight", "demon1" => "demon"}
+			dict = {"hell_knight" => "hknight", "demon1" => "demon", "army" => "enforcer"}
 			proxy["model"] = dict[classname[8..-1]]
 			proxy["model"] = classname[8..-1] unless proxy["model"]
 		end
