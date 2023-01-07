@@ -1305,18 +1305,63 @@ end
 
 end # QuakeImporter
 
-# enable this to break out after N seconds
-#wd = QuakeImporter::watchdog(60)
 
-filename = UI.openpanel "Choose Quake map", 'q1pak/maps', 'e1m1.bsp'
-if (filename)
+class Quake1Importer < Sketchup::Importer
+
+  # This method is called by SketchUp to determine the description that
+  # appears in the File > Import dialog's pulldown list of valid
+  # importers.
+  def description
+    return "Quake1 level importer (*.bsp)"
+  end
+
+  # This method is called by SketchUp to determine what file extension
+  # is associated with your importer.
+  def file_extension
+    return "bsp"
+  end
+
+  # This method is called by SketchUp to get a unique importer id.
+  def id
+    return "org.billyard.importers.quake1"
+  end
+
+  # This method is called by SketchUp to determine if the "Options"
+  # button inside the File > Import dialog should be enabled while your
+  # importer is selected.
+  def supports_options?
+    return false
+  end
+
+  # This method is called by SketchUp when the user clicks on the
+  # "Options" button inside the File > Import dialog. You can use it to
+  # gather and store settings for your importer.
+  def do_options
+    # In a real use you would probably store this information in an
+    # instance variable.
+    #my_settings = UI.inputbox(['Quake Import Option:'], ['1'], "Import Options")
+  end
+
+  # This method is called by SketchUp after the user has selected a file
+  # to import. This is where you do the real work of opening and
+  # processing the file.
+  def load_file(file_path, status)
+
+	# enable this to break out after N seconds
+	#wd = QuakeImporter::watchdog(60)
+	
 	parser = QuakeImporter::Quake1Parser.new
-	parser.Parse(File.dirname(filename)+"/..", File.basename(filename))
-	Sketchup.active_model.name = "#{File.basename(filename)}"
-	Sketchup.active_model.description = "Quake map: #{File.basename(filename)}"
+	parser.Parse(File.dirname(file_path)+"/..", File.basename(file_path))
+	Sketchup.active_model.name = "#{File.basename(file_path)}"
+	Sketchup.active_model.description = "Quake map: #{File.basename(file_path)}"
 	Sketchup.active_model.layers["INFO"].visible = false
 	Sketchup.active_model.layers["NODRAW"].visible = false
+
+	#QuakeImporter::stopdog(wd)
+
+    return Sketchup::Importer::ImportSuccess
+  end
 end
 
-#QuakeImporter::stopdog(wd)
+Sketchup.register_importer(Quake1Importer.new)
 
