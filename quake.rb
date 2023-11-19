@@ -183,7 +183,7 @@ class Texinfo2_t < BitStruct
 	
 	unsigned	:flags,		32
 	unsigned	:value,		32
-	text		:name,		32
+	text		:name,		256
 	unsigned	:nexttexinfo,	32
 
 	rest		:next,		Texinfo2_t
@@ -373,6 +373,143 @@ class Simpleframe_t < BitStruct
 	rest		:next,		Simpleframe_t
 end
 
+# WAD2/3 files
+class Wadheader_t < BitStruct
+	default_options :endian => :little
+
+	unsigned	:id,		32
+
+	unsigned :numentries,	32
+	unsigned :diroffset,	32
+
+	rest		:next,		Wadheader_t
+end
+
+class Wadentry_t < BitStruct
+	default_options :endian => :little
+
+	unsigned :offset,	32
+	unsigned :dsize,	32
+	unsigned :msize,	32
+	unsigned :type,	8
+	unsigned :cmprs,	8
+	unsigned :dummy,	16
+	text		:name,		128
+	
+	rest		:next,		Wadentry_t
+end
+
+class Studioheader_t < BitStruct
+	default_options :endian => :little
+
+	text		:name,		512
+	unsigned	:hlength, 32
+
+	nest		:eyeposition,		Vec3_t
+	nest		:min,	Vec3_t
+	nest		:max,	Vec3_t
+	nest		:bbmin,	Vec3_t
+	nest		:bbmax,	Vec3_t
+	unsigned		:flags,	32
+
+	unsigned		:numbones,	32
+	unsigned		:boneindex,	32
+
+	unsigned		:numbonecontrollers,	32
+	unsigned		:bonecontrollerindex,	32
+
+	unsigned		:numhitboxes,	32
+	unsigned		:hitboxindex,	32
+
+	unsigned		:numseq,	32
+	unsigned		:seqindex,	32
+
+	unsigned		:numseqgroups,	32
+	unsigned		:seqgroupindex,	32
+
+	unsigned		:numtextures,	32
+	unsigned		:textureindex,	32
+	unsigned		:texturedataindex,	32
+
+	unsigned		:numskinref,	32
+	unsigned		:numskinfamilies,	32
+	unsigned		:skinindex,	32
+
+	unsigned		:numbodyparts,	32
+	unsigned		:bodypartindex,	32
+
+	unsigned		:numattachments,	32
+	unsigned		:attachmentindex,	32
+
+	unsigned		:soundtable,	32
+	unsigned		:soundindex,	32
+	unsigned		:soundgroups,	32
+	unsigned		:soundgroupindex,	32
+
+	unsigned		:numtransitions,	32
+	unsigned		:transitionindex,	32
+
+	rest		:next,		Studioheader_t
+end
+
+class Studiotexture_t < BitStruct
+	default_options :endian => :little
+
+	text		:name,		512
+	unsigned	:flags, 32
+	unsigned	:width, 32
+	unsigned	:height, 32
+	unsigned	:texindex, 32
+
+	rest		:next,		Studiotexture_t
+end
+
+class Studiobodyparts_t < BitStruct
+	default_options :endian => :little
+
+	text		:name,		512
+	unsigned	:nummodels, 32
+	unsigned	:base, 32
+	unsigned	:modelindex, 32
+
+	rest		:next,		Studiobodyparts_t
+end
+
+class Studiomodel_t < BitStruct
+	default_options :endian => :little
+
+	text		:name,		512
+	unsigned	:type, 32
+	float	:boundingradius, 32
+	
+	unsigned	:nummesh, 32
+	unsigned	:meshindex, 32
+
+	unsigned	:numverts, 32
+	unsigned	:vertinfoindex, 32
+	unsigned	:vertindex, 32
+	unsigned	:numnorms, 32
+	unsigned	:norminfoindex, 32
+	unsigned	:normindex, 32
+
+	unsigned	:numgroups, 32
+	unsigned	:groupindex, 32
+
+	rest		:next,		Studiomodel_t
+end
+
+class Studiomesh_t < BitStruct
+	default_options :endian => :little
+
+	unsigned	:numtris, 32
+	unsigned	:triindex, 32
+	unsigned	:skinref, 32
+	unsigned	:numnorms, 32
+	unsigned	:normindex, 32
+
+	rest		:next,		Studiomesh_t
+end
+
 
 end 	# DONT DEFINE TWICE
 
@@ -454,8 +591,9 @@ class GameParser
 			return
 		end
 
+		# NB max file read is 33554432 bytes
 		aFile = File.open(rootPath + "/maps/" + mapname,"rb")
-		mapbytes = aFile.read(2<<20) 
+		mapbytes = aFile.read(2<<24)
 		aFile.close
 
 		# add some handy layers
@@ -494,6 +632,7 @@ class GameParser
 			rescue
 				puts "PROBLEMS"
 			end
+
 			current = entities
 			while current
 				proxy = {}
@@ -573,6 +712,8 @@ class GameParser
 
 	def ParseEntity(proxy, current, rootPath)
 
+		puts "GameParser::ParseEntity"
+
 		classname = getkeystring(current, "classname", nil)
 		#puts "class: " + classname
 
@@ -628,6 +769,8 @@ class Quake1Parser < GameParser
 
 	def AddTexture(matname, pixels, mip, palette)
 
+		puts "Quake1Parser::AddTexture: #{matname}"
+		
 		mat = Sketchup.active_model.materials.add(matname)
 
 		img = QImage.new(mip.width,mip.height)
@@ -652,38 +795,10 @@ class Quake1Parser < GameParser
 		return mat
 	end
 	
-	def AddBrush(mapbytes, mid)
-		map = Dheader_t.new(mapbytes)
-
-		amodel = Model_t.new(mapbytes[map.lump_models.offset0 + Model_t.round_byte_length * mid, Model_t.round_byte_length])		
-		group = Sketchup.active_model.entities.add_group
-		faces = Face_t.new(mapbytes[map.lump_faces.offset0 + Face_t.round_byte_length * amodel.face_id, Face_t.round_byte_length * amodel.face_num])
-		nodes = Dnode_t.new(mapbytes[map.lump_nodes.offset0, map.lump_nodes.size0])
-
-		leafs = Dleaf_t.new(mapbytes[map.lump_leafs.offset0, map.lump_leafs.size0])		
-		leaffaces = mapbytes[map.lump_leaffaces.offset0, map.lump_leaffaces.size0].unpack('v*')
-
-		#WalkNodes(nodes, 0)
-
-		# read mipheader and all miptexs
-		mats = []
-		mipheader = Mipheader_t.new(mapbytes[map.lump_textures.offset0, Mipheader_t.round_byte_length])
-		texoffsets = mapbytes[map.lump_textures.offset0 + Mipheader_t.round_byte_length, mipheader.numtex * 4].unpack('V*')
-		for tid in 0...mipheader.numtex
-			mip = Miptex_t.new(mapbytes[map.lump_textures.offset0 + texoffsets[tid],  Miptex_t.round_byte_length])
-			#ensure its zero terminated so we can save it
-			matname = mip.name
-			matname = mip.name[0,mip.name.index(/\x00/)] if (mip.name.index(/\x00/) != nil)
-			# map to valid filename
-			matname[0] = '_' if matname[0] == '*'
-
-			mat = Sketchup.active_model.materials[matname]
-			if not mat
-				puts "Material(#{matname}): size(#{mip.width},#{mip.width})"
-
-				pixels = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset1, mip.width * mip.height].bytes
-				mat = AddTexture(matname, pixels, mip, @qpalette)
+	def DecorateMaterial(matname, mat)
 	
+			puts "Quake1Parser::DecorateMaterial: #{matname}"
+
 				# glow
 				if (matname[1,4] == "lava")
 					mat.set_attribute(:lmap, :rgbwave, 4)
@@ -741,8 +856,50 @@ class Quake1Parser < GameParser
 				if (matname.include?("+0_med")) or (matname.include?("rune")) or (matname.include?("+0slip")) or (matname.include?("slipside"))
 					mat.set_attribute(:lmap, :additive, true)
 				end
-			end
+	end
+	
+	def AddBrush(mapbytes, mid)
+		map = Dheader_t.new(mapbytes)
 
+		amodel = Model_t.new(mapbytes[map.lump_models.offset0 + Model_t.round_byte_length * mid, Model_t.round_byte_length])		
+		group = Sketchup.active_model.entities.add_group
+		faces = Face_t.new(mapbytes[map.lump_faces.offset0 + Face_t.round_byte_length * amodel.face_id, Face_t.round_byte_length * amodel.face_num])
+		nodes = Dnode_t.new(mapbytes[map.lump_nodes.offset0, map.lump_nodes.size0])
+
+		leafs = Dleaf_t.new(mapbytes[map.lump_leafs.offset0, map.lump_leafs.size0])		
+		leaffaces = mapbytes[map.lump_leaffaces.offset0, map.lump_leaffaces.size0].unpack('v*')
+
+		#WalkNodes(nodes, 0)
+
+		# read mipheader and all miptexs
+		mats = []
+		mipheader = Mipheader_t.new(mapbytes[map.lump_textures.offset0, Mipheader_t.round_byte_length])
+		texoffsets = mapbytes[map.lump_textures.offset0 + Mipheader_t.round_byte_length, mipheader.numtex * 4].unpack('V*')
+		for tid in 0...mipheader.numtex
+			mip = Miptex_t.new(mapbytes[map.lump_textures.offset0 + texoffsets[tid],  Miptex_t.round_byte_length])
+			#ensure its zero terminated so we can save it
+			matname = mip.name
+			matname = mip.name[0,mip.name.index(/\x00/)] if (mip.name.index(/\x00/) != nil)
+			# map to valid filename
+			matname[0] = '_' if matname[0] == '*'
+
+			mat = Sketchup.active_model.materials[matname]
+			if not mat
+				if mip.offset1 != 0
+					pixels = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset1, mip.width * mip.height].bytes
+				end
+				
+				# using single palette or embedded palettes?
+				palette = @qpalette
+				if (map.version == 30) and (mip.offset1 != 0)
+					palette = mapbytes[map.lump_textures.offset0 + texoffsets[tid] + mip.offset8 + (mip.width * mip.height)/64 + 2, 768].bytes
+				end
+				mat = AddTexture(matname, pixels, mip, palette)
+	
+				DecorateMaterial(matname, mat)
+
+			end
+			
 			mats[tid] = mat
 		end
 
@@ -750,9 +907,9 @@ class Quake1Parser < GameParser
 			
 			vertices = []
 			surfedges = mapbytes[map.lump_surfedges.offset0 + 4 * faces.ledge_id, 4*faces.ledge_num].unpack('V*')
-      		mid = 2**31
-      		max_unsigned = 2**32
-      		surfedges.each_index {|n| surfedges[n] = ((surfedges[n]>=mid) ? surfedges[n] - max_unsigned : surfedges[n])}
+			mid = 2**31
+			max_unsigned = 2**32
+			surfedges.each_index {|n| surfedges[n] = ((surfedges[n]>=mid) ? surfedges[n] - max_unsigned : surfedges[n])}
 			for e in 0...faces.ledge_num do
 			
 				if surfedges[e] < 0
@@ -775,7 +932,21 @@ class Quake1Parser < GameParser
 				normal = normal.reverse
 				vertices = vertices.reverse
 			end
-			face = group.entities.add_face vertices	
+			
+			# SU add_face is very picky, so condition data
+			#vertices.uniq!
+			
+			
+			begin
+				face = group.entities.add_face vertices
+			rescue
+				puts "add_face: failed"
+				puts "#{vertices[0][0].to_f} #{vertices[0][1].to_f} #{vertices[0][2].to_f}"
+				puts "#{vertices[1][0].to_f} #{vertices[1][1].to_f} #{vertices[1][2].to_f}"
+				puts "#{vertices[2][0].to_f} #{vertices[2][1].to_f} #{vertices[2][2].to_f}"
+				face = group.entities.add_face vertices[0..2]
+			end
+			
 			face.reverse! if normal.dot(face.normal) < 0
 			
 			texinfo = Texinfo_t.new(mapbytes[map.lump_texinfo.offset0 + Texinfo_t.round_byte_length * faces.texinfo_id, Texinfo_t.round_byte_length])
@@ -791,7 +962,7 @@ class Quake1Parser < GameParser
 
 			# some we want to make doublesided
 			# 
-			dsided = ((mat.name[0] == '_') or (mat.name[0,3] == "sky"))
+			dsided = ((mat.name[0] == '_') or (mat.name[0] == '!') or (mat.name[0,3] == "sky"))
 
 			pos_tex = []
 			for i in 0...vertices.size do
@@ -820,7 +991,9 @@ class Quake1Parser < GameParser
 					face.position_material(mat, pos_tex, false)
 				end
 			rescue
+				puts "position_material: failed"
 			end
+			
 			faces = faces.next
 		end	
 		
@@ -844,9 +1017,9 @@ class Quake1Parser < GameParser
 			unless defn
 				defn = Sketchup.active_model.definitions.add(model)
 
-				prog = MdlIdent_t.new(progbytes)
+				ident = MdlIdent_t.new(progbytes)
 				mdl = Mdl_t.new(prog.next)
-				puts "mdl.version: #{prog.version}"
+				puts "mdl.version: #{ident.version}"
 				puts "#{model}: skins(#{mdl.numskins}) geom(#{mdl.numverts},#{mdl.numtris})"			
 				offset = MdlIdent_t.round_byte_length + Mdl_t.round_byte_length
 
@@ -993,6 +1166,8 @@ class Quake1Parser < GameParser
 	
 	def ParseEntity(proxy, current, rootPath)
 
+		puts "Quake1Parser::ParseEntity"
+
 		classname = getkeystring(current, "classname", nil)
 
 		# some stuff we're not interested in
@@ -1039,7 +1214,7 @@ class Quake1Parser < GameParser
 				instance = Sketchup.active_model.entities.add_instance(defn, ltm)
 				instance.layer = "LU_lights"
 				instance.set_attribute(:lightsource, :radius, getkeyval(current, "light", 100.0))
-				instance.set_attribute(:lightsource, :lumen, getkeyval(current, "light", 100.0))
+				instance.set_attribute(:lightsource, :lumen, getkeyval(current, "light", 250.0))
 				style = getkeyval(current, "style", 0)
 				style = 1 if (classname[6,10] == "fluoro")
 				case Integer(style) & 15
@@ -1149,6 +1324,9 @@ class Quake1Parser < GameParser
 	end
 	
 	def Validate(mapbytes, rootPath)
+		
+		puts "Quake1Parser::Validate: #{rootPath}"
+	
 		map = Dheader_t.new(mapbytes)
 		
 		# cache Vertex_t and Edge_t ?
@@ -1182,10 +1360,260 @@ class Quake1Parser < GameParser
 		end
 
 		puts "map.version: #{map.version}"
-		map.version == 29	or 	map.version == 30  or map.version == 38
+		map.version == 29	or map.version == 38
 	end
 end
 
+class HL1Parser < Quake1Parser
+	@qadfiles = nil
+
+	def WalkNodes(nodes, depth)
+		puts "#{nodes.firstface} #{nodes.numfaces}"
+		if (nodes.left > 0)
+			
+		end
+
+	end
+
+	def AddTexture(matname, pixels, mip, palette)
+	
+		puts "HL1Parser::AddTexture: #{matname} off:#{mip.offset1}"
+
+		# ensure its zero terminated
+		mipname = mip.name.downcase
+		mipname = mip.name[0,mip.name.index(/\x00/)] if (mip.name.index(/\x00/) != nil)
+
+		# these can be large so read incrementally
+		if mip.offset1 == 0
+		
+			@wadfiles.each {|wadfilename|
+
+					# is it even in this WAD?
+					manifest = @wadcache[wadfilename]
+					if manifest and (manifest.include?(mipname) == false)
+						puts "#{mipname}: not in cached manifest for #{wadfilename}"
+						next
+					end
+					newmanifest = []
+					
+					found = false
+					aFile = File.open(wadfilename, "rb")
+					wadbytes = aFile.read(Wadheader_t.round_byte_length)
+					wadheader = Wadheader_t.new(wadbytes)
+					puts "searching WAD #{wadfilename} (#{wadheader.numentries} entries) for #{mipname}"
+					offset = wadheader.diroffset
+					for wid in 0...wadheader.numentries
+						aFile.seek(offset, IO::SEEK_SET)
+						wadbytes = aFile.read(Wadentry_t.round_byte_length)
+						wadentry = Wadentry_t.new(wadbytes)
+						newmanifest.push wadentry.name.downcase
+						
+						offset += Wadentry_t.round_byte_length
+
+						if ((wadentry.name).casecmp((mipname)) == 0)
+							aFile.seek(wadentry.offset, IO::SEEK_SET)
+							wadbytes = aFile.read(wadentry.dsize);
+							
+							mip = Miptex_t.new(wadbytes[0, Miptex_t.round_byte_length])
+							pixels = wadbytes[mip.offset1, mip.width * mip.height].bytes
+							palette = wadbytes[mip.offset8 + (mip.width * mip.height)/64 + 2, 256 * 3].bytes
+							puts "#{wid}: FOUND   #{wadentry.name} #{wadentry.dsize} #{wadentry.msize} #{wadentry.offset}"
+
+							# signal we've found it but complete the manifest
+							found = true
+							
+						end
+					end
+					@wadcache[wadfilename] = newmanifest
+					aFile.close
+					break if found
+			}
+		end
+		
+		return super(matname, pixels, mip, palette)
+	end
+
+	def DecorateMaterial(matname, mat)
+	
+		puts "HL1Parser::DecorateMaterial: #{matname}"
+		
+		# area lights with canonical-ish names
+		if (matname.include?("lgt")) or (matname.include?("lght"))
+			mat.set_attribute(:lmap, :emitter, true)
+			mat.set_attribute(:lmap, :additive, true)
+			mat.set_attribute(:lmap, :density, 1.0)
+			mat.set_attribute(:lmap, :power, 1000.0)
+		end
+
+		if (matname.include?("spot"))
+			mat.set_attribute(:lmap, :emitter, true)
+			mat.set_attribute(:lmap, :additive, true)
+			mat.set_attribute(:lmap, :density, 0.0)
+			mat.set_attribute(:lmap, :power, 2500.0)
+		end
+
+		# large emitters
+		if (matname[1,5] == "toxic")
+			mat.set_attribute(:lmap, :emitter, true)
+			mat.set_attribute(:lmap, :fullbright, true)
+			mat.set_attribute(:lmap, :density, 0.25)
+			mat.set_attribute(:lmap, :power, 100.0)
+			mat.alpha = 0.7
+		end
+		
+		if (matname.include?("water"))
+			mat.alpha = 0.4
+		end
+		
+		if (matname.include?("glass"))
+			mat.alpha = 0.25
+		end
+		
+		return super(matname, mat)
+		
+	end
+
+	def AddBrush(mapbytes, mid)
+
+		puts "HL1Parser::AddBrush:  #{mid}"
+		return super(mapbytes, mid)
+
+	end
+
+	def AddModel(rootPath, model)
+
+		puts "HL1Parser::AddModel:  #{model}"
+
+		if model.include?(".mdl")
+			filename = "/" + model
+		else
+			filename = "/models/" + model + ".mdl"
+		end
+
+		if File.exist?(rootPath + filename)
+			puts "READING #{rootPath + filename}"
+			aFile = File.open(rootPath + filename,"rb")
+			progbytes = aFile.read(2<<20)
+			aFile.close
+
+			defn = Sketchup.active_model.definitions[model]
+			unless defn
+				defn = Sketchup.active_model.definitions.add(model)
+
+				ident = MdlIdent_t.new(progbytes)
+				mdl = Studioheader_t.new(progbytes[MdlIdent_t.round_byte_length, Studioheader_t.round_byte_length])
+				puts "mdl.version: #{ident.version}"
+				puts "mdl.name: #{mdl.name} len(#{mdl.hlength}) eye(#{mdl.eyeposition.x},#{mdl.eyeposition.y},#{mdl.eyeposition.z})"
+				puts "#{model}: numtex(#{mdl.numtextures}) skins(#{mdl.numskinref}) bones(#{mdl.numbones}) hitbox(#{mdl.numhitboxes}) seq(#{mdl.numseq})"
+				if mdl.numtextures == 0
+						puts "Fetching texture MDL"
+						AddModel(rootPath, model.include?(".mdl") ? model.sub(".mdl", "t.mdl") : model + "t")
+				end
+
+				offset = MdlIdent_t.round_byte_length
+				for sk in 0...mdl.numskinref
+
+					mdltex = Studiotexture_t.new(progbytes[mdl.textureindex + Studiotexture_t.round_byte_length * sk, Studiotexture_t.round_byte_length])
+					matname = mdltex.name
+					matname = mdltex.name[0,mdltex.name.index(/\x00/)] if (mdltex.name.index(/\x00/) != nil)
+					mat = Sketchup.active_model.materials[matname]
+					if not mat
+						puts "skin #{matname}: #{mdltex.width}x#{mdltex.height}"
+						mip = Miptex_t.new
+						mip.name = matname
+						mip.width = mdltex.width
+						mip.height = mdltex.height
+						mip.offset1 = 1
+
+						pixels = progbytes[mdltex.texindex, mip.width * mip.height].bytes
+						palette = progbytes[mdltex.texindex + mip.width * mip.height, 768].bytes
+
+						mat = AddTexture(matname, pixels, mip, palette)
+	
+						DecorateMaterial(matname, mat)
+				
+					end
+				end
+				 
+				for bp in 0...mdl.numbodyparts
+					part = Studiobodyparts_t.new(progbytes[mdl.bodypartindex + Studiobodyparts_t.round_byte_length * bp, Studiobodyparts_t.round_byte_length])
+					puts "#{bp}: #{part.name} #{part.nummodels}"
+
+					for modeli in 0...part.nummodels
+						smodel = Studiomodel_t.new(progbytes[part.modelindex + Studiomodel_t.round_byte_length * modeli, Studiomodel_t.round_byte_length])
+						puts "    #{modeli}: #{smodel.name} #{smodel.nummesh} #{smodel.numverts}"
+
+						verts = Vec3_t.new(progbytes[smodel.vertindex, Vec3_t.round_byte_length * smodel.numverts])
+						vertinfos = progbytes[smodel.vertinfoindex, Vec3_t.round_byte_length * smodel.numverts].bytes
+
+						for meshi in 0...smodel.nummesh
+							smesh = Studiomesh_t.new(progbytes[smodel.meshindex + Studiomesh_t.round_byte_length * meshi, Studiomesh_t.round_byte_length])
+							puts "      #{meshi}: tri:#{smesh.numtris} normals:#{smesh.numnorms}  mat:#{smesh.skinref}"
+							
+							
+						end
+						
+					end
+
+				end
+				 
+			end
+
+			instance = Sketchup.active_model.entities.add_instance(defn, Geom::Transformation.new)
+			return instance
+		end
+
+		if File.exist?(rootPath + "/maps/" + model + ".bsp")
+			aFile = File.open(rootPath + "/maps/" + model + ".bsp","rb")
+			mapbytes = aFile.read(2<<20) 
+			aFile.close
+			return AddBrush(mapbytes, 0)
+		end
+
+		return AddMarker()
+	end
+	
+	def GetEntities(mapbytes)
+		map = Dheader_t.new(mapbytes)
+		mapbytes[map.lump_entities.offset0, map.lump_entities.size0] 
+	end
+	
+	def ParseEntity(proxy, current, rootPath)
+
+		result = super(proxy, current, rootPath)
+		
+		puts "HL1Parser::ParseEntity"
+
+		classname = getkeystring(current, "classname", nil)
+		if classname == "worldspawn"
+			skybox = getkeystring(current, "skyname", nil)
+			if skybox
+				puts "USING skybox: #{rootPath + '/env/' + skybox}"
+			end
+
+		elsif classname.include?("illusionary")
+			proxy["renderlayer"] = "NODRAW"
+		end
+
+		return result
+	end
+	
+	def Validate(mapbytes, rootPath)
+	
+		super(mapbytes, rootPath)
+		
+		puts "HL1Parser::Validate: #{rootPath}"
+	
+		# cache Vertex_t and Edge_t ?
+		@wadfiles = Dir[rootPath + "/*.wad"] + Dir[rootPath + "/maps/*.wad"]
+		@wadcache = {}
+		puts "Found #{@wadfiles.length} WAD files"
+
+		map = Dheader_t.new(mapbytes)
+		return map.version == 30
+	end
+end
+		
 
 ######### RUNTIME CODE!
 
@@ -1289,16 +1717,23 @@ def playgame
 end
 
 
-def watchdog(timeout)
+def QuakeImporter.watchdog(timeout)
 
 	wd = Thread.new(Thread.current, timeout) { |towatch, tout|
 		sleep(tout)
-		towatch.raise "WATCHDOG timer"
+	
+		puts "*" * 70
+		puts "*" * 70
+		puts "WATCH DOG TIMEOUT"
+		puts "*" * 70
+		puts "*" * 70
+
+		towatch.raise "**** WATCHDOG timer ****"
 	}
 
 end
 
-def stopdog(wd)
+def QuakeImporter.stopdog(wd)
 	Thread.kill(wd)
 	nil
 end
@@ -1347,21 +1782,80 @@ class Quake1Importer < Sketchup::Importer
   # processing the file.
   def load_file(file_path, status)
 
-	# enable this to break out after N seconds
-	#wd = QuakeImporter::watchdog(60)
-	
-	parser = QuakeImporter::Quake1Parser.new
-	parser.Parse(File.dirname(file_path)+"/..", File.basename(file_path))
-	Sketchup.active_model.name = "#{File.basename(file_path)}"
-	Sketchup.active_model.description = "Quake map: #{File.basename(file_path)}"
-	Sketchup.active_model.layers["INFO"].visible = false
-	Sketchup.active_model.layers["NODRAW"].visible = false
+		# enable this to break out after N seconds
+		#wd = QuakeImporter::watchdog(60)
+		
+		parser = QuakeImporter::Quake1Parser.new
+		parser.Parse(File.dirname(file_path)+"/..", File.basename(file_path))
+		Sketchup.active_model.name = "#{File.basename(file_path)}"
+		Sketchup.active_model.description = "Quake map: #{File.basename(file_path)}"
+		Sketchup.active_model.layers["INFO"].visible = false
+		Sketchup.active_model.layers["NODRAW"].visible = false
 
-	#QuakeImporter::stopdog(wd)
+		#QuakeImporter::stopdog(wd)
 
     return Sketchup::Importer::ImportSuccess
   end
 end
 
 Sketchup.register_importer(Quake1Importer.new)
+
+class HL1Importer < Sketchup::Importer
+
+  # This method is called by SketchUp to determine the description that
+  # appears in the File > Import dialog's pulldown list of valid
+  # importers.
+  def description
+    return "HalfLife1 level importer (*.bsp)"
+  end
+
+  # This method is called by SketchUp to determine what file extension
+  # is associated with your importer.
+  def file_extension
+    return "bsp"
+  end
+
+  # This method is called by SketchUp to get a unique importer id.
+  def id
+    return "org.billyard.importers.hl1"
+  end
+
+  # This method is called by SketchUp to determine if the "Options"
+  # button inside the File > Import dialog should be enabled while your
+  # importer is selected.
+  def supports_options?
+    return false
+  end
+
+  # This method is called by SketchUp when the user clicks on the
+  # "Options" button inside the File > Import dialog. You can use it to
+  # gather and store settings for your importer.
+  def do_options
+    # In a real use you would probably store this information in an
+    # instance variable.
+    #my_settings = UI.inputbox(['Quake Import Option:'], ['1'], "Import Options")
+  end
+
+  # This method is called by SketchUp after the user has selected a file
+  # to import. This is where you do the real work of opening and
+  # processing the file.
+  def load_file(file_path, status)
+
+		# enable this to break out after N seconds
+		wd = QuakeImporter::watchdog(120)
+		
+		parser = QuakeImporter::HL1Parser.new
+		parser.Parse(File.dirname(file_path)+"/..", File.basename(file_path))
+		Sketchup.active_model.name = "#{File.basename(file_path)}"
+		Sketchup.active_model.description = "Half Life 1 map: #{File.basename(file_path)}"
+		Sketchup.active_model.layers["INFO"].visible = false
+		Sketchup.active_model.layers["NODRAW"].visible = false
+
+		QuakeImporter::stopdog(wd)
+
+    return Sketchup::Importer::ImportSuccess
+  end
+end
+
+Sketchup.register_importer(HL1Importer.new)
 
