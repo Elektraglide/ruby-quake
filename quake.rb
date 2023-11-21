@@ -399,6 +399,46 @@ class Wadentry_t < BitStruct
 	rest		:next,		Wadentry_t
 end
 
+class Sprite_t < BitStruct
+	default_options :endian => :little
+
+	unsigned :ident,	32
+	unsigned :version,	32
+	unsigned :type,	32
+	unsigned :texformat,	32
+	float :boundingradius,	32
+
+	unsigned :width,	32
+	unsigned :height,	32
+	unsigned :numframes,	32
+	float :beamlength,	32
+	unsigned :synctype,	32
+	
+	unsigned :numentries, 16
+	
+	rest		:next,		Sprite_t
+end
+
+class Spriteframe_t < BitStruct
+	default_options :endian => :little
+
+	signed :x,	32
+	signed :y,	32
+	unsigned :width,	32
+	unsigned :height,	32
+
+	rest		:next,		Spriteframe_t
+end
+
+class Spritegroup_t < BitStruct
+	default_options :endian => :little
+
+	signed :numframes,	32
+
+	rest		:next,		Spritegroup_t
+end
+
+
 class Studioheader_t < BitStruct
 	default_options :endian => :little
 
@@ -509,6 +549,26 @@ class Studiomesh_t < BitStruct
 
 	rest		:next,		Studiomesh_t
 end
+
+class Studiovert_t < BitStruct
+	default_options :endian => :little
+
+	signed		:vertindex,		16
+	signed		:normindex,		16
+	signed		:u,		16
+	signed		:v,		16
+
+	rest		:next,		Studiovert_t
+end
+
+class Studioshort_t < BitStruct
+	default_options :endian => :little
+
+	signed		:value,		16
+
+	rest		:next,		Studioshort_t
+end
+
 
 
 end 	# DONT DEFINE TWICE
@@ -657,7 +717,8 @@ class GameParser
 	
 					# name it
 					mesh.name = getkeystring(current, "classname", nil) + "_" + getkeystring(current, "targetname", proxy["model"])
-					
+					mesh.name = getkeystring(current, "targetname", nil) if getkeystring(current, "targetname", nil)
+
 					# place it
 					origin = getkeyvector(current, "origin", "0 0 0")
 					ltm = Geom::Transformation.new(origin)
@@ -944,7 +1005,12 @@ class Quake1Parser < GameParser
 				puts "#{vertices[0][0].to_f} #{vertices[0][1].to_f} #{vertices[0][2].to_f}"
 				puts "#{vertices[1][0].to_f} #{vertices[1][1].to_f} #{vertices[1][2].to_f}"
 				puts "#{vertices[2][0].to_f} #{vertices[2][1].to_f} #{vertices[2][2].to_f}"
-				face = group.entities.add_face vertices[0..2]
+
+				# last gasp, check its not zero area
+				v1 = Geom::Vector3d.new(vertices[1].x-vertices[0].x, vertices[1].y-vertices[0].y, vertices[1].z-vertices[0].z)
+				v2 = Geom::Vector3d.new(vertices[2].x-vertices[0].x, vertices[2].y-vertices[0].y, vertices[2].z-vertices[0].z)
+				area = (v1 * v2).length
+				#face = group.entities.add_face vertices[0..2]	if area > 0.0
 			end
 			
 			face.reverse! if normal.dot(face.normal) < 0
@@ -1009,13 +1075,14 @@ class Quake1Parser < GameParser
 		end
 
 		if File.exist?(rootPath + "/progs/" + model + ".mdl")
-			aFile = File.open(rootPath + "/progs/" + model + ".mdl","rb")
-			progbytes = aFile.read(2<<20) 
-			aFile.close
 
 			defn = Sketchup.active_model.definitions[model]
 			unless defn
 				defn = Sketchup.active_model.definitions.add(model)
+
+				aFile = File.open(rootPath + "/progs/" + model + ".mdl","rb")
+				progbytes = aFile.read(2<<20)
+				aFile.close
 
 				ident = MdlIdent_t.new(progbytes)
 				mdl = Mdl_t.new(prog.next)
@@ -1445,11 +1512,18 @@ class HL1Parser < Quake1Parser
 			mat.set_attribute(:lmap, :power, 1000.0)
 		end
 
+		if (matname.include?("_scrn")) or (matname.include?("_crt")) or (matname.include?("generic85"))
+			mat.set_attribute(:lmap, :emitter, true)
+			mat.set_attribute(:lmap, :additive, true)
+			mat.set_attribute(:lmap, :density, 1.0)
+			mat.set_attribute(:lmap, :power, 500.0)
+		end
+
 		if (matname.include?("spot"))
 			mat.set_attribute(:lmap, :emitter, true)
 			mat.set_attribute(:lmap, :additive, true)
 			mat.set_attribute(:lmap, :density, 0.0)
-			mat.set_attribute(:lmap, :power, 2500.0)
+			mat.set_attribute(:lmap, :power, 10000.0)
 		end
 
 		# large emitters
@@ -1468,7 +1542,7 @@ class HL1Parser < Quake1Parser
 		if (matname.include?("glass"))
 			mat.alpha = 0.25
 		end
-		
+
 		return super(matname, mat)
 		
 	end
@@ -1480,9 +1554,81 @@ class HL1Parser < Quake1Parser
 
 	end
 
+	def AddSprite(rootPath, model)
+
+
+		defn = Sketchup.active_model.definitions[model]
+		unless defn
+			defn = Sketchup.active_model.definitions.add(model)
+
+			filename = rootPath + "/" + model
+			if File.exist?(filename)
+				puts "READING #{filename}"
+				aFile = File.open(filename,"rb")
+				spritebytes = aFile.read(2<<20)
+				aFile.close
+
+				matname = File.basename(model)
+				spr = Sprite_t.new(spritebytes)
+				palette = spritebytes[Sprite_t.round_byte_length, spr.numentries * 3].bytes
+				
+				offset = Sprite_t.round_byte_length + spr.numentries * 3
+				for frames in 0...spr.numframes
+					skin = Skin_t.new(spritebytes[offset, Skin_t.round_byte_length])
+					puts "sprite: group(#{skin.group})"
+					offset += Skin_t.round_byte_length
+
+					if skin.group == 1
+						# skip past groupheader + timing array
+						group = Spritegroup_t.new(spritebytes[offset, Spritegroup_t.round_byte_length])
+						offset += Spritegroup_t.round_byte_length
+						offset += 4 * (group.numframes)
+					end
+
+					spriteframe = Spriteframe_t.new(spritebytes[offset, Spriteframe_t.round_byte_length])
+					offset += Spriteframe_t.round_byte_length
+					
+					pixels = spritebytes[offset, spr.width*spr.height].bytes
+					offset += spr.width*spr.height
+
+					mip = Miptex_t.new
+					mip.name = matname + "#{frames}"
+					mip.width = spr.width
+					mip.height = spr.height
+					mip.offset1 = 1
+					mat = AddTexture(mip.name, pixels, mip, palette)
+
+					mat.set_attribute(:lmap, :additive, true)
+					mat.set_attribute(:lmap, :fullbright, true)
+
+				end
+
+				defn.casts_shadows = false
+				defn.behavior.always_face_camera = true
+			
+				vertices = []
+				radius = spr.boundingradius
+				vertices.push Geom::Point3d.new( -radius,0,-radius)
+				vertices.push Geom::Point3d.new(  radius,0,-radius)
+				vertices.push Geom::Point3d.new(  radius,0, radius)
+				vertices.push Geom::Point3d.new( -radius,0, radius)
+				face = defn.entities.add_face [vertices[0],vertices[1],vertices[2],vertices[3]]
+				pos_tex = [vertices[0], [0,0], vertices[1], [1,0], vertices[2], [1,1]]
+				face.position_material(mat, pos_tex, true)
+			end
+			
+		end
+
+		instance = Sketchup.active_model.entities.add_instance(defn, Geom::Transformation.new)
+		return instance
+
+	end
+	
 	def AddModel(rootPath, model)
 
 		puts "HL1Parser::AddModel:  #{model}"
+
+		return AddSprite(rootPath, model) if model.include?(".spr")
 
 		if model.include?(".mdl")
 			filename = "/" + model
@@ -1491,29 +1637,27 @@ class HL1Parser < Quake1Parser
 		end
 
 		if File.exist?(rootPath + filename)
-			puts "READING #{rootPath + filename}"
-			aFile = File.open(rootPath + filename,"rb")
-			progbytes = aFile.read(2<<20)
-			aFile.close
 
 			defn = Sketchup.active_model.definitions[model]
 			unless defn
 				defn = Sketchup.active_model.definitions.add(model)
 
+				puts "READING #{rootPath + filename}"
+				aFile = File.open(rootPath + filename,"rb")
+				progbytes = aFile.read(2<<20)
+				aFile.close
+
 				ident = MdlIdent_t.new(progbytes)
 				mdl = Studioheader_t.new(progbytes[MdlIdent_t.round_byte_length, Studioheader_t.round_byte_length])
-				puts "mdl.version: #{ident.version}"
-				puts "mdl.name: #{mdl.name} len(#{mdl.hlength}) eye(#{mdl.eyeposition.x},#{mdl.eyeposition.y},#{mdl.eyeposition.z})"
-				puts "#{model}: numtex(#{mdl.numtextures}) skins(#{mdl.numskinref}) bones(#{mdl.numbones}) hitbox(#{mdl.numhitboxes}) seq(#{mdl.numseq})"
 				if mdl.numtextures == 0
 						puts "Fetching texture MDL"
 						AddModel(rootPath, model.include?(".mdl") ? model.sub(".mdl", "t.mdl") : model + "t")
 				end
 
-				offset = MdlIdent_t.round_byte_length
-				for sk in 0...mdl.numskinref
+				mats = []
+				for tid in 0...mdl.numskinref
 
-					mdltex = Studiotexture_t.new(progbytes[mdl.textureindex + Studiotexture_t.round_byte_length * sk, Studiotexture_t.round_byte_length])
+					mdltex = Studiotexture_t.new(progbytes[mdl.textureindex + Studiotexture_t.round_byte_length * tid, Studiotexture_t.round_byte_length])
 					matname = mdltex.name
 					matname = mdltex.name[0,mdltex.name.index(/\x00/)] if (mdltex.name.index(/\x00/) != nil)
 					mat = Sketchup.active_model.materials[matname]
@@ -1533,6 +1677,8 @@ class HL1Parser < Quake1Parser
 						DecorateMaterial(matname, mat)
 				
 					end
+
+					mats[tid] = mat
 				end
 				 
 				for bp in 0...mdl.numbodyparts
@@ -1543,18 +1689,52 @@ class HL1Parser < Quake1Parser
 						smodel = Studiomodel_t.new(progbytes[part.modelindex + Studiomodel_t.round_byte_length * modeli, Studiomodel_t.round_byte_length])
 						puts "    #{modeli}: #{smodel.name} #{smodel.nummesh} #{smodel.numverts}"
 
-						verts = Vec3_t.new(progbytes[smodel.vertindex, Vec3_t.round_byte_length * smodel.numverts])
+						vecs = Vec3_t.new(progbytes[smodel.vertindex, Vec3_t.round_byte_length * smodel.numverts])
+						pos = []
+						smodel.numverts.times do
+							x = vecs.x
+							y = vecs.y
+							z = vecs.z
+							pos.push Geom::Point3d.new(x,y,z)
+							vecs = vecs.next
+						end
+
 						vertinfos = progbytes[smodel.vertinfoindex, Vec3_t.round_byte_length * smodel.numverts].bytes
 
 						for meshi in 0...smodel.nummesh
 							smesh = Studiomesh_t.new(progbytes[smodel.meshindex + Studiomesh_t.round_byte_length * meshi, Studiomesh_t.round_byte_length])
 							puts "      #{meshi}: tri:#{smesh.numtris} normals:#{smesh.numnorms}  mat:#{smesh.skinref}"
 							
+							# treat as array of shorts
+							tristrips = Studioshort_t.new(progbytes[smesh.triindex, 2<<20])
+
+							v = [nil,nil,nil]
+							while tristrips.value != 0 do
+								vcount = tristrips.value.abs - 2
+								puts "tristrip: #{vcount}"
+								sverts = Studiovert_t.new(tristrips.next)
+								v[0] = sverts
+								sverts = sverts.next
+								v[1] = sverts
+								sverts = sverts.next
+								for vindex in 0...vcount
+									v[2] = sverts
+									sverts = sverts.next
+									
+									puts "#{vindex}: #{v[0].vertindex} #{v[2].vertindex} #{v[2].vertindex}"
+
+									# need to apply bone+controller transform
+									#face = defn.entities.add_face [pos[v[0].vertindex], pos[v[1].vertindex], pos[v[2].vertindex]]
+									#face.material = mats[smesh.skinref]
+									
+									v[0] = v[1] # if primtype > 0
+									v[1] = v[2]
+								end
+								tristrips = Studioshort_t.new(sverts)
+							end
 							
 						end
-						
 					end
-
 				end
 				 
 			end
@@ -1580,19 +1760,42 @@ class HL1Parser < Quake1Parser
 	
 	def ParseEntity(proxy, current, rootPath)
 
-		result = super(proxy, current, rootPath)
-		
 		puts "HL1Parser::ParseEntity"
 
 		classname = getkeystring(current, "classname", nil)
 		if classname == "worldspawn"
 			skybox = getkeystring(current, "skyname", nil)
 			if skybox
-				puts "USING skybox: #{rootPath + '/env/' + skybox}"
+				Sketchup.active_model.set_attribute(:lmap_prefs, :skyboxfile, "#{rootPath + '/env/' + skybox + 'bk.tga'}" )
 			end
+		end
 
-		elsif classname.include?("illusionary")
+		if classname[0,7] == "weapon_"
+			dict = {"9mmAR" => "w_9mmar", "handgrenade" => "w_grenade"}
+			proxy["model"] = dict[classname[7..-1]]
+		end
+
+		if classname[0,7] == "ammo_"
+			dict = {"9mmAR" => "a_9mmaroclip","ARgrenades" => "w_argrenade"}
+			proxy["model"] = dict[classname[7..-1]]
+		end
+
+		if classname[0,8] == "monster_"
+			dict = {"sitting_scientist" => "scientist"}
+			proxy["model"] = dict[classname[8..-1]] if dict[classname[8..-1]]
+		end
+
+		result = super(proxy, current, rootPath)
+		
+		# fixup
+		if classname.include?("illusionary")
 			proxy["renderlayer"] = "NODRAW"
+		elsif classname[0,4] == "env_"
+			proxy["renderlayer"] = "NODRAW"
+		elsif classname[0,9] == "scripted_"
+			proxy["renderlayer"] = "INFO"
+		elsif classname[0,6] == "multi_"
+			proxy["renderlayer"] = "INFO"
 		end
 
 		return result
@@ -1842,7 +2045,7 @@ class HL1Importer < Sketchup::Importer
   def load_file(file_path, status)
 
 		# enable this to break out after N seconds
-		wd = QuakeImporter::watchdog(120)
+		wd = QuakeImporter::watchdog(300)
 		
 		parser = QuakeImporter::HL1Parser.new
 		parser.Parse(File.dirname(file_path)+"/..", File.basename(file_path))
